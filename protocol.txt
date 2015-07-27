@@ -1,0 +1,37 @@
+Imud.py protocol v0.1
+
+All communication is in ascii plain text.
+All commands sent to the server must be terminated by '\n' i.e. by a new line character.
+All messages from the server are terminated by '\n' i.e. by a new line character.
+
+Responses from the server for valid commands always end with 'OK\n'
+Unknown or otherwise invalid commands return 'huh\n'
+
+Initial Connection:
+	No initial command is required from the client.
+	On connection the server returns 'hello\n', a version string (e.g. 'v0.1\n'), a list of available data (e.g. 'available:iuohtp\n'), the current data values, and finally 'OK\n'
+	At this point it is up to the client whether to close the connection or to keep it open for future polled or pushed updates.
+
+Available Data:
+	A list of codes indicating what data is available. Meaning is as follows:
+
+	i	is the IMU inverted?
+	u	interval between pushed updates (seconds)
+	o	orientation angles of IMU x, y, and z axis (degrees)
+	h	compass heading
+	t	temperature (degrees C)
+	p	pressure (hPa)
+
+Interpreting Data:
+	Actual data format varies however each data line takes the form <data id code>:<data string>\n e.g. t:22.3\n
+	Converting the data string into usable objects in python may be achieved with the literal_eval function of the ast module. See clients/parsed.py for one way to do this.
+
+Querying Data:
+	To read all available data send '?\n' to ther server.
+	To read a specific data item send '?<data item id>\n' e.g. '?t\n'
+
+Pushed Updates:
+	The server can be configured to push all available data to the client at a specified interval. To enabled pushed updates send 'u=<seconds>\n' e.g. 'u=3.3\n'. Too small values for 'u' will add significantly to cpu load and return duplicate data.
+	Pushed updates may be disabled by sending 'u=0\n'.
+	Note: setting 'u' does not change how often the sensors are read just how often the data is pushed to the client.
+

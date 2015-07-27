@@ -873,6 +873,9 @@ def _s_proc_cmd(command, up_int=0.0):
     new_int = None
 
     if command.strip() == '': return ('', None)
+
+    # force incoming command to lowercase
+    command = command.lower()
     
     if command.startswith('u='):
         # set update interval command
@@ -885,8 +888,8 @@ def _s_proc_cmd(command, up_int=0.0):
         if failed:
             result = 'huh?\n'
             new_int = None
-        else:
-            result = 'OK\n'
+##        else:
+##            result = 'OK\n'
     elif command == '?':
         # dontcha just love recursion?
         result += _s_proc_cmd('?o')[0]
