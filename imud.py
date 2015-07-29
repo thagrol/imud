@@ -28,11 +28,9 @@ import sys
 import threading
 import time
 
-##import RPi.GPIO as GPIO
 from RPi.GPIO import RPI_REVISION
 
 # Choose i2c bus according to PI revision
-##if GPIO.RPI_REVISION == 1:
 if RPI_REVISION == 1:
     # Rev 1 Pi
     I2CBUS = 0
@@ -42,7 +40,7 @@ else:
 
 # BerryIMU adresses, registers, etc
 # Accelerometer & magnetometer
-IMU_ACCMAG = 0x1E # device address
+IMU_ACCMAG = 0x1e # device address
 CTRL_REG1_XM = 0x20
 CTRL_REG2_XM = 0x21
 CTRL_REG3_XM = 0x22
@@ -310,7 +308,7 @@ def start_acc(bus=active_i2cbus, device=IMU_ACCMAG, flags=XM_REG1_DEFAULT,
             bus.write_byte_data(device, CTRL_REG2_XM, sense)
             bus.write_byte_data(device, FIFO_CTRL_REG, fifo)
         except IOError as e:
-            logging.error('Unable to configure accelerometer: [%s] S4' %
+            logging.error('Unable to configure accelerometer: [%s] %s' %
                           (e.errno, e.strerror))
             return False
         return True
@@ -319,7 +317,10 @@ def start_acc(bus=active_i2cbus, device=IMU_ACCMAG, flags=XM_REG1_DEFAULT,
 def stop_acc(bus, device=IMU_ACCMAG):
     """disable accelerometer"""
     if bus is not None:
-        bus.write_byte_data(device, CTRL_REG1_XM, XM_REG1_AODR_POWER_DOWN)
+        try:
+            bus.write_byte_data(device, CTRL_REG1_XM, XM_REG1_AODR_POWER_DOWN)
+        except IOError:
+            pass
         return False
     return acc_enabled
     
@@ -394,7 +395,10 @@ def stop_mag(bus, device=IMU_ACCMAG):
     """Disable magnetometer"""
     return mag_enabled
     if bus is not None:
-        bus.write_byte_data(device, CTRL_REG5_XM, 0)
+        try:
+            bus.write_byte_data(device, CTRL_REG5_XM, 0)
+        except IOError:
+            pass
         return False
     return mag_enabled
 
@@ -492,7 +496,10 @@ def start_gyro(bus=active_i2cbus, device=IMU_GYRO, flags=CTRL_REG1_G_DEFAULT,
 def stop_gyro(bus=active_i2cbus, device=IMU_GYRO):
     """Disable gyro"""
     if bus is not None:
-        bus.write_byte_data(device, CTRL_REG1_G, 0)
+        try:
+            bus.write_byte_data(device, CTRL_REG1_G, 0)
+        except IOError:
+            pass
         return False
     return gyro_enabled
 
@@ -888,8 +895,6 @@ def _s_proc_cmd(command, up_int=0.0):
         if failed:
             result = 'huh?\n'
             new_int = None
-##        else:
-##            result = 'OK\n'
     elif command == '?':
         # dontcha just love recursion?
         result += _s_proc_cmd('?o')[0]
@@ -899,25 +904,35 @@ def _s_proc_cmd(command, up_int=0.0):
         result += _s_proc_cmd('?i')[0]
         result += _s_proc_cmd('?u')[0]
         result = result.replace('OK\n','')
+        result = result.replace('huh?\n','')
     elif command == '?o':
         # orientation angles
-        if acc_enabled: result = 'o:%r\n' % acc_deg
+        if acc_enabled:
+            result = 'o:%r\n' % acc_deg
+        else:
+            result = 'huh?\n'
     elif command == '?h':
         # compass heading
-        result = 'h:'
         if mag_enabled:
+            result = 'h:'
             result += str((heading_to_cardinal(heading_comp), heading_comp))
             result += '\n'
+        else:
+            result = 'huh?\n'
     elif command == '?t':
         # temp, from pressure sensor
-        result = 't:'
         if press_enabled:
+            result = 't:'
             result += '%2.2f\n' % temp_p
+        else:
+            result = 'huh?\n'
     elif command == '?p':
         # pressure
-        result = 'p:'
         if press_enabled:
+            result = 'p:'
             result += '%5.2f\n' % pressure
+        else:
+            result = 'huh?\n'
     elif command == '?u':
         result = 'u:%f\n' % up_int
     elif command == '?i':
@@ -1140,10 +1155,10 @@ if __name__ == '__main__':
         # write new pid file (only if daemonized)
         my_pid = os.getpid()
         try:
-            open(PID_FILE, 'w').write(str(my_pid))
+            open(PID_FILE, 'w').write(str(my_pid) + '\n')
         except IOError:
             try:
-                open(FALLBACK_PID_FILE, 'w').write(str(my_pid))
+                open(FALLBACK_PID_FILE, 'w').write(str(my_pid) + '\n')
             except:
                 pass
         
