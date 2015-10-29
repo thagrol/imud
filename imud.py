@@ -240,8 +240,12 @@ MSL_PRESSURE = 1013.25 # hPa
 MSL_TEMP = 15.0 # degC
 
 # socket server
-LISTEN_PORT = 7691
+DEFAULT_PORT = 7691
 LISTEN_HOST = ''
+
+# broadcast server
+BROADCAST_ADDRESS = '<broadcast>'
+BROADCAST_INTERVAL = 1.0
 
 #MISC
 AG_FILTER = 0.80
@@ -294,6 +298,7 @@ stop_threads = False
 
 # Misc
 active_i2cbus = None
+
 
 # start of function definitions
 
@@ -820,44 +825,61 @@ def check_threads():
     """check tracker threads are still running and restart if necessary"""
     global thread_list
     if not stop_threads:
-        if not thread_list['listener'].is_alive():
-            logging.info('Thread %s has died. Restarting', thread_list['listener'].name)
-            t = threading.Thread(target=_s_listener,
-                                        args=(cmd_args.port, cmd_args.bind))
-            t.start()
-            thread_list['listener'] = t
+        if not cmd_args.nolisten:
+            if not thread_list['listener'].is_alive():
+                logging.info('Thread %s has died. Restarting' % thread_list['listener'].name)
+                t = threading.Thread(target=_s_listener,
+                                     args=(cmd_args.port, cmd_args.bind))
+                t.start()
+                thread_list['listener'] = t
         if acc_enabled and thread_list['acc'] is not None:
             if not thread_list['acc'].is_alive():
-                logging.info('Thread %s has died. Restarting', thread_list['acc'].name)
+                logging.info('Thread %s has died. Restarting' % thread_list['acc'].name)
                 t = threading.Thread(target=track_acc, args=(active_i2cbus, ))
                 t.start()
                 thread_list['acc'] = t
         if mag_enabled and thread_list['mag'] is not None:
             if not thread_list['mag'].is_alive():
-                logging.info('Thread %s has died. Restarting', thread_list['mag'].name)
+                logging.info('Thread %s has died. Restarting' % thread_list['mag'].name)
                 t = threading.Thread(target=track_mag, args=(active_i2cbus, ))
                 t.start()
                 thread_list['mag'] = t
         if gyro_enabled and thread_list['gyro'] is not None:
             if not thread_list['gyro'].is_alive():
-                logging.info('Thread %s has died. Restarting', thread_list['gyro'].name)
+                logging.info('Thread %s has died. Restarting' % thread_list['gyro'].name)
                 t = threading.Thread(target=track_gyro, args=(active_i2cbus, ))
                 t.start()
                 thread_list['gyro'] = t
         if press_enabled:
             if  not thread_list['press'].is_alive():
-                logging.info('Thread %s has died. Restarting', thread_list['press'].name)
+                logging.info('Thread %s has died. Restarting' % thread_list['press'].name)
                 t = threading.Thread(target=track_press, args=(active_i2cbus, ))
                 t.start()
                 thread_list['press'] = t
             if  not thread_list['temp'].is_alive():
-                logging.info('Thread %s has died. Restarting', thread_list['temp'].name)
+                logging.info('Thread %s has died. Restarting' % thread_list['temp'].name)
                 t = threading.Thread(target=track_temp, args=(active_i2cbus, ))
                 t.start()
                 thread_list['press'] = t
 
+
+# broadcast server
+def _bcast_server(port=DEFAULT_PORT, addr=BROADCAST_ADDRESS,
+                  interval=BROADCAST_INTERVAL):
+    logging.info('Starting broadcast server on port %s with update interval %s'
+                 % (port, interval))
+    bs = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    bs.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    while not stop_threads:
+        time.sleep(interval)
+        message = _s_proc_cmd('?')[0]
+        print message
+        bs.sendto(message, (addr, port))
+    bs.close()
+
+
 # socket server
-def _s_listener(port=LISTEN_PORT, bind_to=LISTEN_HOST):
+def _s_listener(port=DEFAULT_PORT, bind_to=LISTEN_HOST):
     logging.info('Listening on %s:%s' % (bind_to, port))
     ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     ss.bind((bind_to, port))
@@ -1104,13 +1126,16 @@ if __name__ == '__main__':
     # cmd line args
     parser = argparse.ArgumentParser(
         epilog='If neither -l nor -b are present all available interfaces are bound.')
-    parser.add_argument('-p', '--port', help='port to listen on. (default: %s)'
-                        % LISTEN_PORT, type=int, default=LISTEN_PORT)
     group = parser.add_mutually_exclusive_group()
+    group.add_argument('-N', '--nolisten', help='Do not listen for incoming connections',
+                        action='store_true')
     group.add_argument('-l', '--local', help='bind to localhost only.',
                         action='store_true')
     group.add_argument('-b', '--bind', help='address of interface to bind to.',
                        type=valid_ipv4, default=LISTEN_HOST, metavar='W.X.Y.Z')
+    parser.add_argument('-B', '--broadcast', help='Use netwrok broadcasts.', action='store_true')
+    parser.add_argument('-p', '--port', help='port to use.',
+                        type=int, default=DEFAULT_PORT)
     parser.add_argument('-i', '--i2c', type=int, choices=[0,1],
                         help='i2c bus to use.(default: %s)' % I2CBUS, default=I2CBUS)
     parser.add_argument('-g', '--gyro', help='address of gyroscope (default: %s)' % hex(IMU_GYRO),
@@ -1248,14 +1273,25 @@ if __name__ == '__main__':
         thread_list['temp'] = t
 
     # start socket server
-    try:
-        listener = threading.Thread(name='_s_listener', target=_s_listener,
-                                    args=(cmd_args.port, cmd_args.bind))
-        listener.start()
-        thread_list['listener'] = listener
-    except:
-        logging.critical('Unable to start server thread. Exiting')
-        sys.exit(1)
+    if not cmd_args.nolisten:
+        try:
+            listener = threading.Thread(name='_s_listener', target=_s_listener,
+                                        args=(cmd_args.port, cmd_args.bind))
+            listener.start()
+            thread_list['listener'] = listener
+        except:
+            logging.error('Unable to start server thread.')
+##            sys.exit(1)
+            
+    # start broadcast server
+    if cmd_args.broadcast:
+        try:
+            broadcaster = threading.Thread(name='_bcast_servert',
+                                           target=_bcast_server,
+                                           args=(cmd_args.port, ))
+            broadcaster.start()
+        except:
+            logging.error('Unable to start broadcast server')
 
     time.sleep(1) # give everything time to start
     
@@ -1264,7 +1300,7 @@ if __name__ == '__main__':
             check_threads()
             time.sleep(0.25)
     except KeyboardInterrupt:
-        _cleanup()
+##        _cleanup()
         logging.shutdown()
         sys.exit(os.EX_OK)
     finally:
