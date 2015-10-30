@@ -793,6 +793,26 @@ def valid_ipv4(address):
     
     return address
 
+def valid_ipv4m(address):
+    valid_ipv4(address)
+    valid=False
+    octets = [int(s) for s in address.split('.')]
+    if octets[0] in range(224, 238):
+        if octets[0] == 224 and octets[1] == 0 and octets[2] ==0:
+            # reserved addresses
+            pass
+        else:
+            # globally scoped multicast addresses
+            valid = True
+    elif octets[0] == 239:
+        # locally scoped multicast addresses
+        valid=True
+
+    if not valid:
+        raise argparse.ArgumentTypeError('%s is not a valid IPv4 multicast address' % address)
+    
+    return address
+
 def hex_string_to_int(string):
     return int(string, 16)
 
@@ -825,13 +845,28 @@ def check_threads():
     """check tracker threads are still running and restart if necessary"""
     global thread_list
     if not stop_threads:
-        if not cmd_args.nolisten:
+        if not cmd_args.nolisten and thread_list['listener'] is not None:
             if not thread_list['listener'].is_alive():
                 logging.info('Thread %s has died. Restarting' % thread_list['listener'].name)
                 t = threading.Thread(target=_s_listener,
                                      args=(cmd_args.port, cmd_args.bind))
                 t.start()
                 thread_list['listener'] = t
+        if cmd_args.broadcast and thread_list['broadcaster'] is not None:
+            if not thread_list['broadcaster'].is_alive():
+                logging.info('Thread %s has died. Restarting' % thread_list['broadcaster'].name)
+                t = threading.Thread(name='_bcast_servert', target=_bcast_server,
+                                     args=(BROADCAST_ADDRESS, cmd_args.port,BROADCAST_INTERVAL))
+                t.start()
+                thread_list['broadcaster'] = t
+        if cmd_args.multicast and thread_list['multicaster'] is not None:
+            if not thread_list['multicaster'].is_alive():
+                logging.info('Thread %s has died. Restarting' % thread_list['multicaster'].name)
+                t = threading.Thread(name='_mcast_servert', target=_mcast_server,
+                                     args=(cmd_args.multicast, cmd_args.port,
+                                           BROADCAST_INTERVAL))
+                t.start()
+                thread_list['broadcaster'] = t
         if acc_enabled and thread_list['acc'] is not None:
             if not thread_list['acc'].is_alive():
                 logging.info('Thread %s has died. Restarting' % thread_list['acc'].name)
@@ -864,8 +899,7 @@ def check_threads():
 
 
 # broadcast server
-def _bcast_server(port=DEFAULT_PORT, addr=BROADCAST_ADDRESS,
-                  interval=BROADCAST_INTERVAL):
+def _bcast_server(addr, port, interval):
     logging.info('Starting broadcast server on port %s with update interval %s'
                  % (port, interval))
     bs = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -873,9 +907,20 @@ def _bcast_server(port=DEFAULT_PORT, addr=BROADCAST_ADDRESS,
     while not stop_threads:
         time.sleep(interval)
         message = _s_proc_cmd('?')[0]
-        print message
         bs.sendto(message, (addr, port))
     bs.close()
+
+# multicast server
+def _mcast_server(addr, port, interval):
+    logging.info('Starting multicast server on %s:%s with update interval %s'
+                 % (addr, port, interval))
+    ms = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    ms.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 20)
+    while not stop_threads:
+        time.sleep(interval)
+        message = _s_proc_cmd('?')[0]
+        ms.sendto(message, (addr, port))
+    ms.close()
 
 
 # socket server
@@ -1133,7 +1178,10 @@ if __name__ == '__main__':
                         action='store_true')
     group.add_argument('-b', '--bind', help='address of interface to bind to.',
                        type=valid_ipv4, default=LISTEN_HOST, metavar='W.X.Y.Z')
-    parser.add_argument('-B', '--broadcast', help='Use netwrok broadcasts.', action='store_true')
+    parser.add_argument('-B', '--broadcast', help='Use netwrok broadcasts.',
+                        action='store_true')
+    parser.add_argument('-M', '--multicast', help='Use IPv4 multicasting.',
+                        type=valid_ipv4m, metavar='address')
     parser.add_argument('-p', '--port', help='port to use.',
                         type=int, default=DEFAULT_PORT)
     parser.add_argument('-i', '--i2c', type=int, choices=[0,1],
@@ -1149,6 +1197,10 @@ if __name__ == '__main__':
     parser.add_argument('--debug', help='enabled debug output',
                         action='store_true')
     cmd_args = parser.parse_args()
+
+    #dev only
+##    print cmd_args.multicast
+##    sys.exit(os.EX_OK)
     
     # is there an existing process running?
     process_exists = [None, None]
@@ -1288,10 +1340,24 @@ if __name__ == '__main__':
         try:
             broadcaster = threading.Thread(name='_bcast_servert',
                                            target=_bcast_server,
-                                           args=(cmd_args.port, ))
+                                           args=(BROADCAST_ADDRESS, cmd_args.port,
+                                                 BROADCAST_INTERVAL))
             broadcaster.start()
+            thread_list['broadcaster'] = broadcaster
         except:
             logging.error('Unable to start broadcast server')
+    
+    # start multicast server
+    if cmd_args.multicast is not None:
+        try:
+            multicaster = threading.Thread(name='_mcast_servert',
+                                           target=_mcast_server,
+                                           args=(cmd_args.multicast, cmd_args.port,
+                                                 BROADCAST_INTERVAL))
+            multicaster.start()
+            thread_list['multicaster'] = multicaster
+        except:
+            logging.error('Unable to start multicast server')
 
     time.sleep(1) # give everything time to start
     

@@ -5,11 +5,11 @@ import sys
 
 # quick hack so server script can be found
 sys.path.append('..')
-from imud import LISTEN_PORT
+from imud import DEFAULT_PORT
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 # change next line as required for your setup.
-s.connect(('localhost', LISTEN_PORT))
+s.connect(('localhost', DEFAULT_PORT))
 
 while True:
     d = s.recv(4096)
